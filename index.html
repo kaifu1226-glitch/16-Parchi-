@@ -1,1 +1,253 @@
 
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>16 PARCHI</title>
+<style>
+:root{--bg:#10172a;--panel:#1b2742;--gold:#ffd166;--ink:#f5f7ff;--muted:#aebbd4}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at top,#26385d,#10172a 60%);color:var(--ink);font-family:system-ui,Arial,sans-serif;min-height:100vh}
+main{max-width:760px;margin:auto;padding:18px}
+.brand{text-align:center;font-size:28px;font-weight:900;letter-spacing:2px;color:var(--gold);margin:8px}
+.sub{text-align:center;color:var(--muted);margin-bottom:18px}
+.panel{background:#1b2742ef;border:1px solid #435477;border-radius:18px;padding:16px;margin:12px 0;box-shadow:0 12px 30px #0004}
+h2{font-size:18px;margin:0 0 12px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+input,button{font:inherit;border-radius:12px;padding:12px;border:1px solid #536789}
+input{background:#111a2e;color:white;min-width:0;flex:1}
+button{background:var(--gold);color:#182039;font-weight:800;border:0;cursor:pointer}
+button.secondary{background:#344563;color:white}
+button:disabled{opacity:.4;cursor:not-allowed}
+.hidden{display:none!important}
+.muted{color:var(--muted);font-size:13px}
+.players{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.player{background:#263653;border-radius:12px;padding:10px}
+.player.active{outline:2px solid var(--gold)}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card{background:linear-gradient(145deg,#fff,#dce7f7);color:#182039;border-radius:14px;min-height:90px;display:flex;align-items:center;justify-content:center;flex-direction:column;font-size:21px;font-weight:900;border:3px solid #b5c7e5;cursor:pointer;box-shadow:0 5px 12px #0004}
+.card small{font-size:12px;font-weight:700;color:#52617a}
+.card.selected{border-color:var(--gold);transform:translateY(-4px)}
+.status{text-align:center;font-weight:700;color:var(--gold);padding:8px}
+.big{font-size:26px;font-weight:900;color:var(--gold)}
+.scoreline{display:flex;justify-content:space-between;padding:9px;border-bottom:1px solid #405170}
+.note{background:#2b3b5b;border-radius:12px;padding:10px;color:#dbe6fb;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<div class="brand">🃏 16 PARCHI</div>
+<div class="sub">4 players · clockwise · one-by-one</div>
+
+<section id="setup" class="panel">
+<h2>Room banao ya join karo</h2>
+<div class="row"><input id="playerName" maxlength="16" placeholder="Apna naam"><button id="createBtn">Create Room</button></div>
+<div class="row" style="margin-top:9px"><input id="roomCode" maxlength="6" placeholder="Room code"><button id="joinBtn" class="secondary">Join Room</button></div>
+<p class="muted">Firebase connected · 4 players · Room code share karke join karein.</p>
+</section>
+
+<section id="lobby" class="panel hidden">
+<h2>Room: <span id="roomLabel" class="big"></span></h2>
+<div id="lobbyPlayers" class="players"></div>
+<p class="muted">4 players join hone par host game start kar sakta hai.</p>
+<button id="startBtn" disabled>Shuffle & Deal Cards</button>
+<button id="leaveBtn" class="secondary">Leave room</button>
+</section>
+
+<section id="game" class="hidden">
+<div class="panel">
+<div class="row" style="justify-content:space-between"><b>Room <span id="gameRoom"></span></b><b id="roundLabel">Round 1</b></div>
+<div class="status" id="turnStatus">Waiting...</div>
+<div id="tablePlayers" class="players"></div>
+</div>
+<div class="panel">
+<h2>Your parchiyan</h2>
+<div id="hand" class="cards"></div>
+<p class="muted">Ek parchi select karo, phir Pass dabao. Parchi clockwise next player ko milegi.</p>
+<button id="passBtn" disabled>Selected parchi pass karo →</button>
+</div>
+<div class="panel">
+<div class="row"><button id="nextRoundBtn" class="secondary hidden">Next Round</button><button id="endBtn" class="secondary">End Game & Show Winner</button></div>
+</div>
+</section>
+
+<section id="result" class="panel hidden">
+<h2>🏆 Final Result</h2>
+<div id="winnerText" class="big"></div>
+<div id="scoreBoard"></div>
+<button id="againBtn">Back to room</button>
+</section>
+<div id="message" class="status"></div>
+<div class="panel note">Raja 10000 · Rani 7000 · Mantri 5000 · Chor 2000. Round winner ko us category ka amount milega. Cumulative leaderboard game end par dikhegi.</div>
+</main>
+
+<script type="module">
+const firebaseConfig = {
+ apiKey:"AIzaSyAUa0V_Nl0T5ZVMeiI3HShqjSakbbakKCY",
+ authDomain:"parchi-8c9f2.firebaseapp.com",
+ databaseURL:"https://parchi-8c9f2-default-rtdb.asia-southeast1.firebasedatabase.app",
+ projectId:"parchi-8c9f2",
+ storageBucket:"parchi-8c9f2.firebasestorage.app",
+ messagingSenderId:"712685265960",
+ appId:"1:712685265960:web:3e5193865301c3bb1b411d",
+ measurementId:"G-3PDJTJQCKT"
+};
+
+let db=null,uid=null,room=null,isHost=false,selected=null,unsub=null,fb=null;
+const amounts={Raja:10000,Rani:7000,Mantri:5000,Chor:2000};
+const $=id=>document.getElementById(id);
+const show=(id,on=true)=>$(id).classList.toggle("hidden",!on);
+function msg(t){$("message").textContent=t}
+function code(){return Math.random().toString(36).slice(2,8).toUpperCase()}
+function shuffle(a){for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+async function ensure(){
+ if(fb)return fb;
+ const appMod=await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
+ const dbMod=await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+ const authMod=await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
+ const app=appMod.initializeApp(firebaseConfig);
+ db=dbMod.getDatabase(app);
+ const auth=authMod.getAuth(app);
+ const cred=await authMod.signInAnonymously(auth);
+ uid=cred.user.uid;
+ fb={...dbMod};
+ return fb;
+}
+
+function renderRoom(data){
+ if(!data)return;
+ const players=Object.values(data.players||{});
+ $("roomLabel").textContent=room;
+ $("gameRoom").textContent=room;
+ $("lobbyPlayers").innerHTML=players.map(p=>`<div class="player">${esc(p.name)} ${p.uid===data.host?"👑":""}</div>`).join("");
+ $("tablePlayers").innerHTML=players.map(p=>`<div class="player ${data.turn===p.uid?"active":""}">${esc(p.name)}<br><small>${(data.scores||{})[p.uid]||0} points</small></div>`).join("");
+ $("startBtn").disabled=players.length!==4||!isHost||data.started;
+ if(data.started&&!data.finished){show("lobby",false);show("game",true);renderGame(data)}
+ if(data.finished){show("game",false);show("result",true);renderResult(data)}
+}
+
+async function subscribe(){
+ const f=await ensure();
+ if(unsub)unsub();
+ unsub=f.onValue(f.ref(db,"rooms/"+room),snap=>renderRoom(snap.val()));
+}
+
+async function createRoom(){
+ try{
+  const f=await ensure();
+  const name=$("playerName").value.trim()||"Player 1";
+  room=code();isHost=true;
+  const player={uid,name,seat:0};
+  await f.set(f.ref(db,"rooms/"+room),{
+   host:uid,players:{[uid]:player},scores:{[uid]:0},
+   started:false,finished:false,round:1,turn:null,order:[uid]
+  });
+  show("setup",false);show("lobby");
+  await subscribe();msg("Room ban gaya! Code share karo.");
+ }catch(e){msg(e.message)}
+}
+
+async function joinRoom(){
+ try{
+  const f=await ensure();
+  const name=$("playerName").value.trim()||"Player";
+  room=$("roomCode").value.trim().toUpperCase();
+  if(!room)throw Error("Room code daalo.");
+  const r=f.ref(db,"rooms/"+room);
+  const snap=await f.get(r);
+  if(!snap.exists())throw Error("Room nahi mila.");
+  const d=snap.val(),ids=Object.keys(d.players||{});
+  if(ids.length>=4)throw Error("Room full hai.");
+  const seat=ids.length;
+  await f.update(r,{
+   ["players/"+uid]:{uid,name,seat},
+   ["scores/"+uid]:0,
+   order:[...d.order,uid]
+  });
+  isHost=false;show("setup",false);show("lobby");
+  await subscribe();msg("Room join ho gaya!");
+ }catch(e){msg(e.message)}
+}
+
+async function startGame(){
+ try{
+  const f=await ensure(),r=f.ref(db,"rooms/"+room);
+  const s=await f.get(r),d=s.val(),ids=d.order;
+  if(ids.length!==4)throw Error("4 players zaroori hain.");
+  const deck=shuffle([...Array(4).fill("Raja"),...Array(4).fill("Rani"),...Array(4).fill("Mantri"),...Array(4).fill("Chor")]);
+  const hands={};ids.forEach((id,i)=>hands[id]=deck.slice(i*4,i*4+4));
+  await f.update(r,{started:true,finished:false,hands,turn:ids[0],scores:d.scores||{},round:d.round||1,roundWinner:null});
+  msg("Cards shuffle hokar deal ho gaye!");
+ }catch(e){msg(e.message)}
+}
+
+function renderGame(d){
+ $("roundLabel").textContent="Round "+d.round;
+ const me=d.hands?.[uid]||[];
+ $("turnStatus").textContent=d.turn===uid?"Tumhari baari — ek parchi select karo":"Dusre player ki baari...";
+ $("hand").innerHTML=me.map((c,i)=>`<div class="card ${selected===i?"selected":""}" data-i="${i}">${c}<small>${amounts[c]}</small></div>`).join("");
+ $("hand").querySelectorAll(".card").forEach(el=>el.onclick=()=>{
+  if(d.turn!==uid||d.roundWinner)return;
+  selected=Number(el.dataset.i);renderGame(d);
+ });
+ $("passBtn").disabled=d.turn!==uid||selected===null||!!d.roundWinner;
+ $("nextRoundBtn").classList.toggle("hidden",!d.roundWinner||!isHost);
+}
+
+async function passCard(){
+ try{
+  const f=await ensure(),r=f.ref(db,"rooms/"+room);
+  await f.runTransaction(r,d=>{
+   if(!d||d.turn!==uid||selected===null||d.roundWinner)return d;
+   const ids=d.order,idx=ids.indexOf(uid),next=ids[(idx+1)%4];
+   const card=d.hands[uid][selected];
+   d.hands[uid].splice(selected,1);
+   d.hands[next].push(card);
+   if(d.hands[next].length===4&&d.hands[next].every(x=>x===card)){
+    d.roundWinner=next;
+    d.scores[next]=(d.scores[next]||0)+amounts[card];
+   }else d.turn=next;
+   return d;
+  });
+  selected=null;msg("Parchi pass ho gayi.");
+ }catch(e){msg(e.message)}
+}
+
+function renderResult(d){
+ const entries=Object.entries(d.scores||{}).map(([id,score])=>({name:d.players[id]?.name||"Player",score})).sort((a,b)=>b.score-a.score);
+ $("winnerText").textContent=entries.length&&entries[0].score>0?entries[0].name+" wins!":"No winner";
+ $("scoreBoard").innerHTML=entries.map((p,i)=>`<div class="scoreline"><span>${i+1}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join("");
+}
+
+async function endGame(){
+ try{const f=await ensure();await f.update(f.ref(db,"rooms/"+room),{finished:true})}
+ catch(e){msg(e.message)}
+}
+
+async function nextRound(){
+ try{
+  const f=await ensure(),r=f.ref(db,"rooms/"+room);
+  const s=await f.get(r),d=s.val(),ids=d.order;
+  const deck=shuffle([...Array(4).fill("Raja"),...Array(4).fill("Rani"),...Array(4).fill("Mantri"),...Array(4).fill("Chor")]);
+  const hands={};ids.forEach((id,i)=>hands[id]=deck.slice(i*4,i*4+4));
+  selected=null;
+  await f.update(r,{round:d.round+1,hands,turn:ids[0],roundWinner:null});
+  msg("Next round shuru!");
+ }catch(e){msg(e.message)}
+}
+
+$("createBtn").onclick=createRoom;
+$("joinBtn").onclick=joinRoom;
+$("startBtn").onclick=startGame;
+$("passBtn").onclick=passCard;
+$("endBtn").onclick=endGame;
+$("nextRoundBtn").onclick=nextRound;
+$("leaveBtn").onclick=()=>location.reload();
+$("againBtn").onclick=()=>location.reload();
+</script>
+</body>
+</html>
+
