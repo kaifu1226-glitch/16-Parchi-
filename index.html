@@ -119,7 +119,7 @@ async function ensure(){
 
 function renderRoom(data){
  if(!data)return;
- const players=Object.values(data.players||{});
+const players=(data.order||Object.keys(data.players||{})).map(id=>data.players?.[id]).filter(Boolean);
  $("roomLabel").textContent=room;
  $("gameRoom").textContent=room;
  $("lobbyPlayers").innerHTML=players.map(p=>`<div class="player">${esc(p.name)} ${p.uid===data.host?"👑":""}</div>`).join("");
@@ -205,12 +205,19 @@ async function passCard(){
    const ids=d.order,idx=ids.indexOf(uid),next=ids[(idx+1)%4];
    const card=d.hands[uid][selected];
    d.hands[uid].splice(selected,1);
-   d.hands[next].push(card);
-   if(d.hands[next].length===4&&d.hands[next].every(x=>x===card)){
-    d.roundWinner=next;
-    d.scores[next]=(d.scores[next]||0)+amounts[card];
-   }else d.turn=next;
-   return d;
+d.hands[next].push(card);
+
+const winnerCard=Object.keys(amounts).find(
+ type=>d.hands[next].filter(x=>x===type).length>=4
+);
+
+if(winnerCard){
+ d.roundWinner=next;
+ d.scores[next]=(d.scores[next]||0)+amounts[winnerCard];
+}else{
+ d.turn=next;
+}
+return d;
   });
   selected=null;msg("Parchi pass ho gayi.");
  }catch(e){msg(e.message)}
